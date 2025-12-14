@@ -1,0 +1,202 @@
+
+--- 2025-12-10 00:35:50 ---
+ERROR: ❌ Erro Vision: name 'text_resp' is not defined | Raw: [
+  {
+    "meta_dados": {
+      "nome_arquivo": "Extraído da Imagem/PDF",
+      "laboratorio": "AGROANÁLISE LABORATÓRIOS INTEGRADOS",
+      "data": "09/11/2022",
+      "profundidade": "0-20"
+    },
+  ...
+
+--- 2025-12-10 00:36:48 ---
+ERROR: ❌ Erro Vision: name 'text_resp' is not defined | Raw: [
+    {
+        "meta_dados": {
+            "nome_arquivo": "Extraído da Imagem/PDF",
+            "laboratorio": "AGROANÁLISE (SOUZA NETO & SOUZA LTDA)",
+            "data": "21/12/2016",
+            ...
+
+--- 2025-12-10 00:49:34 ---
+ARQUIVO: uploaded_image_1765340953959.png
+RESPOSTA CRUA (snippet):
+{
+    "meta_dados": {
+        "nome_arquivo": "713120 A00/7727",
+        "laboratorio": "AGROANÁLISE",
+        "data": "08/11/2022",
+        "profundidade": "0-20"
+    },
+    "fisica": {
+        "argila": 5.0,
+        "areia": 90.0,
+        "silte": 5.0
+    },
+    "quimica": {
+        "ph_cacl2": 5.8,
+        "ph_agua": 6.5,
+        "fosforo_mg": 11.2,
+        "potassio_mg": 117.2,
+        "calcio_cmolc": 2.01,
+        "magnesio_cmolc": 1.20,
+        "aluminio_cmolc": 0.00,
+        "h_al_cmolc":
+JSON PARSED: {
+  "meta_dados": {
+    "nome_arquivo": "713120 A00/7727",
+    "laboratorio": "AGROAN\u00c1LISE",
+    "data": "08/11/2022",
+    "profundidade": "0-20"
+  },
+  "fisica": {
+    "argila": 5.0,
+    "areia": 90.0,
+    "silte": 5.0
+  },
+  "quimica": {
+    "ph_cacl2": 5.8,
+    "ph_agua": 6.5,
+    "fosforo_mg": 11.2,
+    "potassio_mg": 117.2,
+    "calcio_cmolc": 2.01,
+    "magnesio_cmolc": 1.2,
+    "aluminio_cmolc": 0.0,
+    "h_al_cmolc": 3.71,
+    "ctc_total": 6.92,
+    "v_percentual": 46.4,
+    "m_percentual": 0.0,
+    "materia_organica": 1.4
+  },
+  "micronutrientes": {
+    "boro": 0.23,
+    "cobre": 0.45,
+    "ferro": 7.27,
+    "manganes": 3.41,
+    "zinco": 2.21,
+    "enxofre": 28.99
+  }
+}
+
+--- 2025-12-10 00:52:35 ---
+ARQUIVO: temp_8020257489.jpg
+RESPOSTA CRUA (snippet):
+{
+    "meta_dados": {
+        "nome_arquivo": "N/A",
+        "laboratorio": "AGROANÁLISE",
+        "data": "09/11/2022",
+        "profundidade": "N/A"
+    },
+    "fisica": {
+        "argila": 534.0,
+        "areia": 323.0,
+        "silte": 143.0
+    },
+    "quimica": {
+        "ph_cacl2": 5.2,
+        "ph_agua": 6.0,
+        "fosforo_mg": 13.4,
+        "potassio_mg": 125.2,
+        "calcio_cmolc": 2.4,
+        "magnesio_cmolc": 0.98,
+        "aluminio_cmolc": 0.0,
+        "h_al_cmolc": 3.63,
+   
+JSON PARSED: {
+  "meta_dados": {
+    "nome_arquivo": "N/A",
+    "laboratorio": "AGROAN\u00c1LISE",
+    "data": "09/11/2022",
+    "profundidade": "N/A"
+  },
+  "fisica": {
+    "argila": 53.4,
+    "areia": 32.3,
+    "silte": 143.0
+  },
+  "quimica": {
+    "ph_cacl2": 5.2,
+    "ph_agua": 6.0,
+    "fosforo_mg": 13.4,
+    "potassio_mg": 125.2,
+    "calcio_cmolc": 2.4,
+    "magnesio_cmolc": 0.98,
+    "aluminio_cmolc": 0.0,
+    "h_al_cmolc": 3.63,
+    "ctc_total": 7.33,
+    "v_percentual": 50.61,
+    "m_percentual": 0.0,
+    "materia_organica": 26.4
+  },
+  "micronutrientes": {
+    "boro": 0.0,
+    "cobre": 0.0,
+    "ferro": 0.0,
+    "manganes": 0.0,
+    "zinco": 0.0,
+    "enxofre": 0.0
+  }
+}
+
+--- 2025-12-10 01:04:27 ---
+ARQUIVO: temp_8020257489.jpg
+RESPOSTA CRUA (snippet):
+[
+  {
+    "meta_dados": {
+      "nome_arquivo": "Não encontrado",
+      "laboratorio": "AGROANÁLISE / SOUZA NETO & SOUZA LTDA",
+      "data": "09/11/2022",
+      "profundidade": "Não especificado"
+    },
+    "fisica": {
+      "argila": 534.0,
+      "areia": 323.0,
+      "silte": 143.0
+    },
+    "quimica": {
+      "ph_cacl2": 5.2,
+      "ph_agua": 6.0,
+      "fosforo_mg": 13.4,
+      "potassio_mg": 125.2,
+      "calcio_cmolc": 2.4,
+      "magnesio_cmolc": 0.98,
+      "aluminio_cmolc": 0.0,
+     
+JSON PARSED: {
+  "meta_dados": {
+    "nome_arquivo": "N\u00e3o encontrado",
+    "laboratorio": "AGROAN\u00c1LISE / SOUZA NETO & SOUZA LTDA",
+    "data": "09/11/2022",
+    "profundidade": "N\u00e3o especificado"
+  },
+  "fisica": {
+    "argila": 53.4,
+    "areia": 32.3,
+    "silte": 143.0
+  },
+  "quimica": {
+    "ph_cacl2": 5.2,
+    "ph_agua": 6.0,
+    "fosforo_mg": 13.4,
+    "potassio_mg": 125.2,
+    "calcio_cmolc": 2.4,
+    "magnesio_cmolc": 0.98,
+    "aluminio_cmolc": 0.0,
+    "h_al_cmolc": 3.63,
+    "ctc_total": 7.33,
+    "v_percentual": 50.61,
+    "m_percentual": 0.0,
+    "materia_organica": 26.4
+  },
+  "micronutrientes": {
+    "boro": 0.0,
+    "cobre": 0.0,
+    "ferro": 0.0,
+    "manganes": 0.0,
+    "zinco": 0.0,
+    "enxofre": 0.0
+  }
+}
