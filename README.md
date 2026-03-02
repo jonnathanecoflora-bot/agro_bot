@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <b>Bot de Telegram que analisa fotos de laudos de solo com IA e gera recomendações técnicas de calagem e adubação — gratuito para pequenos produtores rurais.</b>
+  <b>Bot de Telegram que analisa fotos e arquivos pdf de analise de solo com IA e gera recomendações técnicas de calagem e adubação — gratuito para pequenos produtores rurais.</b>
 </p>
 
 ---
@@ -17,7 +17,7 @@
 
 O **AgroBot V7** nasceu da necessidade de democratizar o acesso à assistência técnica agronômica no Brasil. Pequenos produtores rurais muitas vezes não têm acesso fácil a um engenheiro agrônomo para interpretar análises de solo — esse bot resolve isso via Telegram, de forma gratuita e acessível.
 
-O produtor tira uma foto da análise de solo no laboratório, envia para o bot, e em segundos recebe:
+O produtor tira uma foto da análise de solo ou envia o arquivo em pdf para o bot, e em segundos recebe:
 - Diagnóstico completo da fertilidade do solo
 - Recomendação de calagem com cálculo preciso
 - Recomendação de adubação por cultura
