@@ -1,0 +1,26 @@
+# venv
+.venv/
+venv/
+
+# python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# env
+.env
+.env.*
+
+# logs
+*.log
+
+# artifacts / generated
+*.pdf
+temp_*
+output/
+reports/
+
+# OS/Editor
+.vscode/
+.DS_Store
