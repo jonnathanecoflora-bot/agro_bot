@@ -13,6 +13,19 @@ __pycache__/
 .env.*
 !.env.example
 
+# Laudos gerados pelo bot
+Laudo_*.pdf
+*_db.json
+
+# Logs
+*.log
+
+# Dados de usuários
+users_log.csv
+
+# Imagens temporárias
+temp_*.jpg
+
 # logs
 *.log
 
