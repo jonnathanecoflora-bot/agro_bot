@@ -46,6 +46,15 @@ reports/
 *.json
 !.env.example
 
+# Imagens (fotos de laudos enviadas ao bot / imagens de teste)
+docs/analise_teste.jpg
+*.jpg
+*.jpeg
+*.png
+
+# Arquivo fantasma
+Nenhum
+
 # OS / Editores
 .vscode/
 .DS_Store

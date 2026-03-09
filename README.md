@@ -1,5 +1,10 @@
 # AgroBot V7 — Sistema de Recomendação Agronômica com IA
 
+![Python](https://img.shields.io/badge/Python-3.11-blue)
+![Telegram](https://img.shields.io/badge/Telegram-Bot-blue)
+![License](https://img.shields.io/badge/License-MIT-green)
+![Status](https://img.shields.io/badge/Status-Active-brightgreen)
+
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.11-blue?style=for-the-badge&logo=python&logoColor=white"/>
   <img src="https://img.shields.io/badge/Telegram-Bot-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white"/>
@@ -41,6 +46,41 @@ O **AgroBot V7** democratiza o acesso à assistência técnica agronômica no Br
 
 ---
 
+## Tecnologias
+
+| Tecnologia | Uso |
+|---|---|
+| Python 3.11 | Linguagem principal |
+| python-telegram-bot 20.x (async) | Interface com a API do Telegram |
+| Google Document AI | OCR de fotos e PDFs de laudos de solo |
+| Google Gemini 2.5 Flash | Extração estruturada dos dados (JSON) a partir do texto OCR |
+| ReportLab | Geração do laudo técnico em PDF |
+| Pillow | Pré-processamento de imagem para melhorar qualidade do OCR |
+| Base científica: Embrapa Cerrados 2004 | Tabelas de interpretação, calagem e adubação |
+
+---
+
+## Estrutura do Projeto
+
+```
+agro_bot/
+├── agrobot/
+│   ├── engine.py          # Motor agronômico (Embrapa Cerrados 2004)
+│   ├── pdf_generator.py   # Geração de laudos em PDF
+│   ├── vision.py          # OCR + extração via DocumentAI + Gemini
+│   └── knowledge_base.py  # Tabelas de referência (documentação)
+├── tests/
+│   ├── teste_prova_real.py
+│   ├── test_vision.py
+│   └── verify_corn_logic.py
+├── telegram_bot.py        # Entry point do bot
+├── requirements.txt
+├── .env.example
+└── CLAUDE.md
+```
+
+---
+
 ## Arquitetura
 
 ```
@@ -74,20 +114,6 @@ Bot envia o PDF ao usuário via send_document()
 
 ---
 
-## Stack
-
-| Componente | Tecnologia |
-|---|---|
-| Linguagem | Python 3.11 |
-| Bot | python-telegram-bot 20.x |
-| OCR | Google Cloud Document AI |
-| Extração estruturada | Google Gemini 2.5 Flash (`response_mime_type: application/json`) |
-| PDF | ReportLab |
-| Imagem (pré-processamento OCR) | Pillow |
-| Env | python-dotenv |
-
----
-
 ## Instalação
 
 ### Pré-requisitos
@@ -102,7 +128,7 @@ Bot envia o PDF ao usuário via send_document()
 
 ```bash
 # 1. Clone o repositório
-git clone https://github.com/seu-usuario/agro_bot.git
+git clone https://github.com/jonnathanecoflora-bot/agro_bot.git
 cd agro_bot
 
 # 2. Crie um ambiente virtual
