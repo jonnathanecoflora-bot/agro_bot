@@ -13,7 +13,7 @@ load_dotenv()
 app = Flask(__name__)
 
 # Configurações do WhatsApp
-VERIFY_TOKEN = "agrobot_token_secreto_123" # Você define isso no Painel do Facebook
+VERIFY_TOKEN = os.getenv("VERIFY_TOKEN", "") # Defina VERIFY_TOKEN no .env
 WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN") # Token de acesso temporário/permanente
 PHONE_NUMBER_ID = os.getenv("PHONE_NUMBER_ID") # ID do número (não é o número de telefone!)
 

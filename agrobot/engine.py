@@ -1,846 +1,539 @@
-import math
-import re
-import numpy as np
-from .knowledge_base import KNOWLEDGE_BASE
+"""
+AgroBot V7 - engine.py
+Motor de cálculo agronômico baseado em Embrapa Cerrados, 2004
+Autor: Jonnathan Marques, Eng. Agrônomo
+Adubação calculada em FONTES SIMPLES: Ureia, Superfosfato Simples, Cloreto de Potássio
+"""
 
-COMMERCIAL_FORMULAS = {
-    'semeadura': [
-        "04-14-08", "04-30-10", "05-25-15", "08-24-12", 
-        "00-20-20", "00-18-18", "00-30-10" 
-    ],
-    'cobertura': [
-        '20-00-20', '30-00-10', '20-05-20', '25-00-25', '20-10-10',
-        '45-00-00 (Ureia)', '21-00-00 (Sulfato de Amônio)', '00-00-60 (KCL)'
-    ]
+# =============================================================================
+# FONTES SIMPLES
+# =============================================================================
+FONTES = {
+    "ureia": {"formula": "45-00-00", "N": 0.45, "P": 0.00, "K": 0.00},
+    "ssp":   {"formula": "00-18-00", "N": 0.00, "P": 0.18, "K": 0.00},  # + 10% S
+    "kcl":   {"formula": "00-00-60", "N": 0.00, "P": 0.00, "K": 0.60},
+}
+SSP_S_PERCENT = 0.10  # Superfosfato Simples fornece ~10% de S
+SULFATO_AMONIO_S = 0.24  # Sulfato de Amônio fornece ~24% de S
+
+
+# =============================================================================
+# TABELAS DE INTERPRETAÇÃO - EMBRAPA CERRADOS 2004
+# =============================================================================
+
+def classificar_fosforo(p_mgdm3, argila_pct):
+    if argila_pct <= 15:
+        limites = [6.0, 12.0, 18.0, 25.0]
+    elif argila_pct <= 35:
+        limites = [5.0, 10.0, 15.0, 20.0]
+    elif argila_pct <= 60:
+        limites = [3.0, 5.0, 8.0, 12.0]
+    else:
+        limites = [2.0, 3.0, 4.0, 6.0]
+
+    if p_mgdm3 <= limites[0]:   return "MUITO BAIXO"
+    elif p_mgdm3 <= limites[1]: return "BAIXO"
+    elif p_mgdm3 <= limites[2]: return "MÉDIO"
+    elif p_mgdm3 <= limites[3]: return "ADEQUADO"
+    else:                       return "ALTO"
+
+
+def classificar_potassio(k_mgdm3, ctc):
+    k_cmol = k_mgdm3 / 391.0
+    if ctc < 4.0:
+        if k_cmol <= 0.038:   return "BAIXO"
+        elif k_cmol <= 0.078: return "MÉDIO"
+        elif k_cmol <= 0.100: return "ADEQUADO"
+        else:                 return "ALTO"
+    else:
+        if k_cmol <= 0.064:   return "BAIXO"
+        elif k_cmol <= 0.128: return "MÉDIO"
+        elif k_cmol <= 0.200: return "ADEQUADO"
+        else:                 return "ALTO"
+
+
+def classificar_ph_cacl2(ph):
+    if ph <= 4.4:   return "BAIXO"
+    elif ph <= 4.8: return "MÉDIO"
+    elif ph <= 5.5: return "ADEQUADO"
+    elif ph <= 5.8: return "ALTO"
+    else:           return "MUITO ALTO"
+
+
+def classificar_ph_h2o(ph):
+    if ph <= 5.1:   return "BAIXO"
+    elif ph <= 5.5: return "MÉDIO"
+    elif ph <= 6.3: return "ADEQUADO"
+    elif ph <= 6.6: return "ALTO"
+    else:           return "MUITO ALTO"
+
+
+def classificar_mo(mo_gdm3, argila_pct):
+    if argila_pct < 15:       # Arenosa
+        limites = [8, 10, 15]
+    elif argila_pct < 35:     # Média
+        limites = [16, 20, 30]
+    elif argila_pct <= 60:    # Argilosa
+        limites = [24, 30, 45]
+    else:                     # Muito argilosa
+        limites = [28, 35, 52]
+
+    if mo_gdm3 < limites[0]:    return "BAIXA"
+    elif mo_gdm3 <= limites[1]: return "MÉDIA"
+    elif mo_gdm3 <= limites[2]: return "ADEQUADA"
+    else:                       return "ALTA"
+
+
+def classificar_ca(ca):
+    if ca < 1.5:    return "BAIXO"
+    elif ca <= 7.0: return "ADEQUADO"
+    else:           return "ALTO"
+
+
+def classificar_mg(mg):
+    if mg < 0.5:    return "BAIXO"
+    elif mg <= 2.0: return "ADEQUADO"
+    else:           return "ALTO"
+
+
+def classificar_al(al_cmol):
+    if al_cmol <= 0.20:   return "MUITO BAIXO"
+    elif al_cmol <= 0.50: return "BAIXO"
+    elif al_cmol <= 1.00: return "MÉDIO"
+    elif al_cmol <= 2.00: return "ALTO"
+    else:                 return "MUITO ALTO"
+
+
+def classificar_v(v_pct):
+    if v_pct <= 20:   return "BAIXO"
+    elif v_pct <= 40: return "MÉDIO"
+    elif v_pct <= 60: return "ADEQUADO"
+    else:             return "ALTO"
+
+
+def textura_solo(argila_pct):
+    if argila_pct < 15:
+        return "ARENOSA"
+    elif argila_pct < 35:
+        return "MÉDIA"
+    elif argila_pct <= 60:
+        return "ARGILOSA"
+    else:
+        return "MUITO ARGILOSA"
+
+
+# =============================================================================
+# CALAGEM - Método Saturação por Bases (Embrapa Cerrados 2004)
+# NC (t/ha) = [(V2 - V1) x T] / PRNT
+# =============================================================================
+
+V2_CULTURA = {
+    "milho":    60,
+    "soja":     60,
+    "arroz":    50,
+    "trigo":    50,
+    "sorgo":    50,
+    "milheto":  50,
+    "algodao":  70,
+    "feijao":   60,
+    "girassol": 60,
 }
 
-def parse_formula(fmt_str):
-    try:
-        clean = fmt_str.split(' ')[0]
-        parts = clean.split('-')
-        return float(parts[0]), float(parts[1]), float(parts[2])
-    except:
-        return 0, 0, 0
+
+def calcular_calagem(v1_pct, ctc, cultura, prnt=80):
+    v2 = V2_CULTURA.get(cultura.lower(), 60)
+    if v1_pct < v2:
+        nc_v = ((v2 - v1_pct) * ctc) / prnt
+    else:
+        nc_v = 0.0
+    nc_v = round(nc_v, 2)
+    return {
+        "v1":              v1_pct,
+        "v2":              v2,
+        "ctc":             ctc,
+        "prnt":            prnt,
+        "nc_v":            nc_v,
+        "nc_recomendado":  nc_v,
+    }
+
+
+# =============================================================================
+# ADUBAÇÃO - Fontes simples por cultura
+# Embrapa Cerrados 2004
+# =============================================================================
+
+def calcular_adubacao(cultura, expectativa, nivel_p, nivel_k, argila_pct, ctc):
+    cultura     = cultura.lower()
+    expectativa = expectativa.lower()
+    nivel_p     = nivel_p.upper()
+    nivel_k     = nivel_k.upper()
+
+    # ------------------------------------------------------------------
+    # MILHO
+    # ------------------------------------------------------------------
+    if cultura == "milho":
+        # N total por expectativa de produtividade
+        n_map = {"baixa": 80, "media": 120, "alta": 160}
+        n_total      = n_map.get(expectativa, 120)
+        n_semeadura  = 30
+        n_cobertura  = n_total - n_semeadura  # cobertura V4-V6
+
+        # P2O5 por nível de P e teor de argila (Tabela Embrapa Cerrados 2004)
+        if argila_pct <= 15:
+            p_doses = {"MUITO BAIXO": 60,  "BAIXO": 30,  "MÉDIO": 15,  "ADEQUADO": 0,  "ALTO": 0}
+        elif argila_pct <= 35:
+            p_doses = {"MUITO BAIXO": 100, "BAIXO": 50,  "MÉDIO": 25,  "ADEQUADO": 0,  "ALTO": 0}
+        elif argila_pct <= 60:
+            p_doses = {"MUITO BAIXO": 200, "BAIXO": 100, "MÉDIO": 50,  "ADEQUADO": 25, "ALTO": 0}
+        else:
+            p_doses = {"MUITO BAIXO": 280, "BAIXO": 140, "MÉDIO": 70,  "ADEQUADO": 35, "ALTO": 0}
+
+        # P alto/adequado em solo argiloso: adubação de manutenção
+        if nivel_p == "ALTO" and argila_pct > 35:
+            p2o5 = 50
+        elif nivel_p == "ADEQUADO" and argila_pct > 35:
+            p2o5 = 50
+        else:
+            p2o5 = p_doses.get(nivel_p, 50)
+
+        # K2O por nível e CTC (Tabela Embrapa Cerrados 2004)
+        if ctc < 4.0:
+            k_doses = {"BAIXO": 50,  "MÉDIO": 25,  "ADEQUADO": 0,  "ALTO": 0}
+        else:
+            k_doses = {"BAIXO": 100, "MÉDIO": 50,  "ADEQUADO": 25, "ALTO": 0}
+
+        # Para alta expectativa, reposição de K mesmo em nível médio/adequado
+        if expectativa == "alta":
+            if nivel_k in ("MÉDIO", "ADEQUADO"):
+                k2o = 110
+            elif nivel_k == "ALTO":
+                k2o = 80
+            else:
+                k2o = k_doses.get(nivel_k, 80)
+        else:
+            k2o = k_doses.get(nivel_k, 50)
+
+        k_semeadura = 50
+        k_cobertura = max(0, k2o - k_semeadura)
+
+        # Enxofre
+        s_dose = 30 if expectativa == "alta" else 20
+
+        # Inoculante
+        inoculante = (
+            "Azospirillum brasilense (Ab-V5 + Ab-V6) — 100-200 mL / 60.000 sementes. "
+            "Compatível com TS fungicida/inseticida quando aplicados separadamente."
+        )
+
+    # ------------------------------------------------------------------
+    # SOJA
+    # ------------------------------------------------------------------
+    elif cultura == "soja":
+        n_total     = 0  # FBN
+        n_semeadura = 0
+        n_cobertura = 0
+
+        if argila_pct <= 15:
+            p_doses = {"MUITO BAIXO": 60,  "BAIXO": 30,  "MÉDIO": 15,  "ADEQUADO": 0,  "ALTO": 0}
+        elif argila_pct <= 35:
+            p_doses = {"MUITO BAIXO": 100, "BAIXO": 50,  "MÉDIO": 25,  "ADEQUADO": 0,  "ALTO": 0}
+        elif argila_pct <= 60:
+            p_doses = {"MUITO BAIXO": 200, "BAIXO": 100, "MÉDIO": 50,  "ADEQUADO": 25, "ALTO": 0}
+        else:
+            p_doses = {"MUITO BAIXO": 280, "BAIXO": 140, "MÉDIO": 70,  "ADEQUADO": 35, "ALTO": 0}
+
+        p2o5 = 50 if nivel_p in ("ALTO", "ADEQUADO") else p_doses.get(nivel_p, 60)
+
+        if ctc < 4.0:
+            k_doses = {"BAIXO": 50,  "MÉDIO": 25,  "ADEQUADO": 0,  "ALTO": 0}
+        else:
+            k_doses = {"BAIXO": 100, "MÉDIO": 50,  "ADEQUADO": 25, "ALTO": 0}
+
+        k2o         = k_doses.get(nivel_k, 50)
+        k_semeadura = k2o
+        k_cobertura = 0
+        s_dose      = 20
+
+        inoculante = (
+            "Bradyrhizobium japonicum (SEMIA 5079 + SEMIA 5080) + Co-Mo — "
+            "dose conforme fabricante. Não misturar com fungicida no mesmo momento."
+        )
+
+    # ------------------------------------------------------------------
+    # CULTURAS GENÉRICAS (arroz, trigo, sorgo, milheto)
+    # ------------------------------------------------------------------
+    else:
+        n_map       = {"baixa": 60, "media": 90, "alta": 120}
+        n_total     = n_map.get(expectativa, 90)
+        n_semeadura = 20
+        n_cobertura = n_total - n_semeadura
+
+        p_doses_base = {"MUITO BAIXO": 120, "BAIXO": 80, "MÉDIO": 50, "ADEQUADO": 30, "ALTO": 20}
+        p2o5         = p_doses_base.get(nivel_p, 50)
+
+        k_doses_base = {"BAIXO": 80, "MÉDIO": 50, "ADEQUADO": 30, "ALTO": 20}
+        k2o          = k_doses_base.get(nivel_k, 50)
+        k_semeadura  = k2o
+        k_cobertura  = 0
+        s_dose       = 20
+
+        inoculante = "Consultar recomendação específica para a cultura."
+
+    # ------------------------------------------------------------------
+    # CÁLCULO DAS FONTES SIMPLES (kg/ha)
+    # ------------------------------------------------------------------
+
+    # Semeadura
+    ureia_semeadura = round(n_semeadura / FONTES["ureia"]["N"], 1) if n_semeadura > 0 else 0.0
+    ssp_semeadura   = round(p2o5        / FONTES["ssp"]["P"], 1)
+    kcl_semeadura   = round(k_semeadura / FONTES["kcl"]["K"], 1) if k_semeadura > 0 else 0.0
+
+    # Cobertura
+    ureia_cobertura = round(n_cobertura / FONTES["ureia"]["N"], 1) if n_cobertura > 0 else 0.0
+    kcl_cobertura   = round(k_cobertura / FONTES["kcl"]["K"], 1) if k_cobertura > 0 else 0.0
+
+    # S fornecido via SSP e complemento
+    s_via_ssp       = round(ssp_semeadura * SSP_S_PERCENT, 1)
+    s_complementar  = round(max(0.0, s_dose - s_via_ssp), 1)
+    sulfato_comp_kg = round(s_complementar / SULFATO_AMONIO_S, 1) if s_complementar > 0 else 0.0
+
+    return {
+        # Nutrientes puros (kg/ha)
+        "N_total":         n_total,
+        "N_semeadura":     n_semeadura,
+        "N_cobertura":     n_cobertura,
+        "P2O5":            p2o5,
+        "K2O_total":       k2o,
+        "K2O_semeadura":   k_semeadura,
+        "K2O_cobertura":   k_cobertura,
+        "S_dose":          s_dose,
+        "S_via_SSP":       s_via_ssp,
+        "S_complementar":  s_complementar,
+
+        # Fontes simples - SEMEADURA (kg/ha)
+        "ureia_semeadura": ureia_semeadura,
+        "ssp_semeadura":   ssp_semeadura,
+        "kcl_semeadura":   kcl_semeadura,
+
+        # Fontes simples - COBERTURA (kg/ha)
+        "ureia_cobertura": ureia_cobertura,
+        "kcl_cobertura":   kcl_cobertura,
+
+        # Complemento de enxofre
+        "sulfato_comp_kg": sulfato_comp_kg,
+
+        # Inoculante
+        "inoculante": inoculante,
+    }
+
+
+# =============================================================================
+# FUNÇÃO PRINCIPAL - recebe dados do usuário e retorna laudo completo
+# =============================================================================
+
+def gerar_laudo(dados: dict) -> dict:
+    """
+    Parâmetros de entrada (dict):
+        solicitante, propriedade, cultura, expectativa
+        argila, ph_agua, ph_cacl2, mo, p, k, ca, mg, al, h_al
+
+    Retorna dict completo com interpretação + calagem + adubação + fontes simples.
+    """
+    argila      = float(dados["argila"])
+    ph_agua     = float(dados["ph_agua"])
+    ph_cacl2    = float(dados["ph_cacl2"])
+    mo          = float(dados["mo"])
+    p           = float(dados["p"])
+    k           = float(dados["k"])
+    ca          = float(dados["ca"])
+    mg          = float(dados["mg"])
+    al          = float(dados.get("al", 0.0))
+    h_al        = float(dados["h_al"])
+    cultura     = dados["cultura"]
+    expectativa = dados["expectativa"]
+
+    # Derivados
+    k_cmol = round(k / 391.0, 4)
+    sb     = round(ca + mg + k_cmol, 2)
+    ctc    = round(sb + h_al, 2)
+    v_pct  = round((sb / ctc) * 100, 1) if ctc > 0 else 0.0
+    m_pct  = round((al / (al + sb)) * 100, 1) if (al + sb) > 0 else 0.0
+
+    # Classificações
+    nivel_p   = classificar_fosforo(p, argila)
+    nivel_k   = classificar_potassio(k, ctc)
+    nivel_ph  = classificar_ph_cacl2(ph_cacl2)
+    nivel_ph_h2o = classificar_ph_h2o(ph_agua)
+    nivel_mo  = classificar_mo(mo, argila)
+    nivel_v   = classificar_v(v_pct)
+    nivel_al  = classificar_al(al)
+    nivel_ca  = classificar_ca(ca)
+    nivel_mg  = classificar_mg(mg)
+    textura   = textura_solo(argila)
+
+    # Calagem
+    calagem = calcular_calagem(v_pct, ctc, cultura)
+
+    # Adubação
+    adubacao = calcular_adubacao(cultura, expectativa, nivel_p, nivel_k, argila, ctc)
+
+    return {
+        # Identificação
+        "solicitante": dados.get("solicitante", ""),
+        "propriedade": dados.get("propriedade", ""),
+        "cultura":     cultura,
+        "expectativa": expectativa,
+
+        # Parâmetros brutos
+        "argila":   argila,
+        "ph_agua":  ph_agua,
+        "ph_cacl2": ph_cacl2,
+        "mo":       mo,
+        "p":        p,
+        "k":        k,
+        "k_cmol":   k_cmol,
+        "ca":       ca,
+        "mg":       mg,
+        "al":       al,
+        "h_al":     h_al,
+
+        # Derivados
+        "sb":    sb,
+        "ctc":   ctc,
+        "v_pct": v_pct,
+        "m_pct": m_pct,
+
+        # Classificações
+        "textura":       textura,
+        "nivel_p":       nivel_p,
+        "nivel_k":       nivel_k,
+        "nivel_ph":      nivel_ph,
+        "nivel_ph_h2o":  nivel_ph_h2o,
+        "nivel_mo":      nivel_mo,
+        "nivel_v":       nivel_v,
+        "nivel_al":      nivel_al,
+        "nivel_ca":      nivel_ca,
+        "nivel_mg":      nivel_mg,
+
+        # Calagem e Adubação
+        "calagem":  calagem,
+        "adubacao": adubacao,
+    }
+
+
+# =============================================================================
+# TESTE LOCAL
+# =============================================================================
+if __name__ == "__main__":
+    dados_teste = {
+        "solicitante": "Jonnathan",
+        "propriedade": "Ecoflora",
+        "cultura":     "milho",
+        "expectativa": "alta",
+        "argila":   53.4,
+        "ph_agua":  6.00,
+        "ph_cacl2": 5.20,
+        "mo":       26.4,
+        "p":        13.4,
+        "k":        125.2,
+        "ca":       2.40,
+        "mg":       0.98,
+        "al":       0.00,
+        "h_al":     3.63,
+    }
+
+    r = gerar_laudo(dados_teste)
+    a = r["adubacao"]
+    c = r["calagem"]
+
+    print("=" * 60)
+    print("AGROBOT V7 - TESTE engine.py")
+    print("=" * 60)
+    print(f"Textura:   {r['textura']}")
+    print(f"SB:  {r['sb']}  |  CTC: {r['ctc']}  |  V%: {r['v_pct']}%")
+    print(f"P:   {r['nivel_p']}  |  K: {r['nivel_k']}")
+    print()
+    print(f"CALAGEM:  {c['nc_recomendado']} t/ha  (V1={c['v1']}%  V2={c['v2']}%  PRNT={c['prnt']}%)")
+    print()
+    print("NUTRIENTES PUROS (kg/ha):")
+    print(f"  N total:  {a['N_total']}  (semeadura {a['N_semeadura']} + cobertura {a['N_cobertura']})")
+    print(f"  P2O5:     {a['P2O5']}")
+    print(f"  K2O:      {a['K2O_total']}  (semeadura {a['K2O_semeadura']} + cobertura {a['K2O_cobertura']})")
+    print(f"  S:        {a['S_dose']}  (via SSP {a['S_via_SSP']} + complementar {a['S_complementar']})")
+    print()
+    print("SEMEADURA - FONTES SIMPLES:")
+    print(f"  Ureia:               {a['ureia_semeadura']:>7.1f} kg/ha  →  {a['N_semeadura']} kg N")
+    print(f"  Superfosfato Simples:{a['ssp_semeadura']:>7.1f} kg/ha  →  {a['P2O5']} kg P2O5")
+    print(f"  Cloreto de Potassio: {a['kcl_semeadura']:>7.1f} kg/ha  →  {a['K2O_semeadura']} kg K2O")
+    print()
+    print("COBERTURA V4-V6 - FONTES SIMPLES:")
+    print(f"  Ureia:               {a['ureia_cobertura']:>7.1f} kg/ha  →  {a['N_cobertura']} kg N")
+    print(f"  Cloreto de Potassio: {a['kcl_cobertura']:>7.1f} kg/ha  →  {a['K2O_cobertura']} kg K2O")
+    if a['s_complementar'] > 0 if 's_complementar' in a else a['S_complementar'] > 0:
+        print(f"  Sulfato de Amonio:   {a['sulfato_comp_kg']:>7.1f} kg/ha  →  {a['S_complementar']} kg S")
+    print()
+    print(f"INOCULANTE: {a['inoculante']}")
+
+
+# =============================================================================
+# ADAPTADOR - telegram_bot.py importa AgroEnginePro
+# =============================================================================
+
+_CHAVES_SOLO = {
+    "ph_agua":          "ph_agua",
+    "ph_cacl2":         "ph_cacl2",
+    "argila":           "argila",
+    "fosforo_mg":       "p",
+    "potassio_mg":      "k",
+    "materia_organica": "mo",
+    "calcio_cmolc":     "ca",
+    "magnesio_cmolc":   "mg",
+    "aluminio_cmolc":   "al",
+    "h_al_cmolc":       "h_al",
+}
+
+
+def _normalizar_dados_solo(dados_brutos: dict) -> dict:
+    normalizado = {}
+    for chave_bot, chave_engine in _CHAVES_SOLO.items():
+        if chave_bot in dados_brutos:
+            normalizado[chave_engine] = float(dados_brutos[chave_bot])
+    if "h_al" not in normalizado and "hidrogenio_cmolc" in dados_brutos:
+        al = float(dados_brutos.get("aluminio_cmolc", 0.0))
+        h  = float(dados_brutos.get("hidrogenio_cmolc", 0.0))
+        normalizado["h_al"] = round(h + al, 2)
+    return normalizado
+
 
 class AgroEnginePro:
-    def __init__(self, dados_solo, dados_usuario):
-        self.raw_data = dados_solo
-        self.user = dados_usuario
-        self.erros = []
-        self.log = []
-        self.diagnostico = {}
-        self.recomendacao = {}
-        self.solo = self._normalizar_dados(dados_solo)
-        self.saida = {}
-        
-    def _normalizar_dados(self, dados):
-        """
-        Normalização Estrita (SRE V7) - Lógica INFALÍVEL H+Al
-        Prioridade 1: Soma Real (H + Al)
-        Prioridade 2: Leitura Direta (H+Al presente no laudo)
-        Prioridade 3: Estimativa SMP
-        """
-        norm = {}
-        
-        # Helper seguro
-        def get_float(val):
-            if val is None: return 0.0
-            if isinstance(val, (int, float)): return float(val)
-            s = str(val).replace('%', '').replace(',', '.').strip()
-            try: return float(s)
-            except: return 0.0
-            
-        def get_val(path):
-            keys = path.split('.')
-            val = dados
-            try:
-                for k in keys: val = val.get(k, {})
-                return get_float(val) if isinstance(val, (str, int, float)) else None
-            except: return None
+    def __init__(self, dados_solo: dict, dados_usuario: dict):
+        self._dados_solo    = dados_solo or {}
+        self._dados_usuario = dados_usuario or {}
 
-        # 1. FÍSICA
-        argila = get_val('fisica.argila') or 0.0
-        if argila > 100: argila /= 10.0
-        norm['argila'] = argila
-        
-        # 2. QUÍMICA BÁSICA
-        norm['ph_cacl2'] = get_val('quimica.ph_cacl2') or 0.0
-        norm['ph_agua'] = get_val('quimica.ph_agua') or 0.0
-        norm['P'] = get_val('quimica.fosforo_mg') or 0.0
-        norm['MO'] = get_val('quimica.materia_organica') or 0.0
-        
-        # 3. BASES
-        K_mg = get_val('quimica.potassio_mg') or 0.0
-        norm['K'] = K_mg
-        K_cmolc = K_mg / 391.0
-        
-        norm['Ca'] = get_val('quimica.calcio_cmolc') or 0.0
-        norm['Mg'] = get_val('quimica.magnesio_cmolc') or 0.0
-        
-        SB = norm['Ca'] + norm['Mg'] + K_cmolc
-        
-        # 4. ACIDEZ (LÓGICA INFALÍVEL)
-        val_H = get_val('quimica.hidrogenio_cmolc')
-        norm['Al'] = get_val('quimica.aluminio_cmolc') or 0.0
-        val_H_Al_Lido = get_val('quimica.h_al_cmolc')
-        
-        if val_H is not None and val_H > 0:
-            norm['H'] = val_H
-            norm['H_Al'] = val_H + norm['Al'] 
-        elif val_H_Al_Lido is not None and val_H_Al_Lido > 0:
-            norm['H_Al'] = val_H_Al_Lido
-            norm['H'] = 0.0 
-        else:
-            if norm['ph_cacl2'] > 0 and norm['ph_cacl2'] < 6.0:
-                norm['H_Al'] = (7.5 - norm['ph_cacl2']) * 1.2
-                self.erros.append(f"⚠️ AVISO: Acidez estimada ({norm['H_Al']:.2f}).")
-            else:
-                norm['H_Al'] = 0.0 + norm['Al']
+    def _montar_entrada(self, dados_solo: dict) -> dict:
+        normalizado = _normalizar_dados_solo(dados_solo)
+        normalizado["solicitante"] = self._dados_usuario.get("nome", "")
+        normalizado["propriedade"] = self._dados_usuario.get("propriedade", "")
+        normalizado["cultura"]     = self._dados_usuario.get("cultura", "outros")
+        normalizado["expectativa"] = self._dados_usuario.get("expectativa", "media")
+        return normalizado
 
-        # 5. CTC e V%
-        norm['SB'] = SB
-        norm['CTC'] = SB + norm['H_Al'] 
-        
-        if norm['CTC'] > 0:
-            norm['V'] = (SB / norm['CTC']) * 100
-            norm['m'] = (norm['Al'] / (SB + norm['Al'])) * 100
-        else:
-            norm['V'] = 0.0
-            norm['m'] = 0.0
-            
-        # Debug
-        print(f"\n🔬 DEBUG ENGINE V7.1: Lógica Infalível")
-        print(f"   ► H: {val_H} | Al: {norm['Al']} | H+Al Lido: {val_H_Al_Lido}")
-        print(f"   ► H+Al Final: {norm['H_Al']:.2f} | CTC: {norm['CTC']:.2f}")
+    def _executar(self, dados_solo: dict) -> dict:
+        entrada = self._montar_entrada(dados_solo)
+        campos_obrigatorios = ["ph_agua", "ph_cacl2", "argila", "p", "k", "mo", "ca", "mg", "h_al"]
+        faltando = [c for c in campos_obrigatorios if c not in entrada]
+        if faltando:
+            return {"erro": True, "mensagens": [f"AVISO: Parametros ausentes: {', '.join(faltando)}"]}
+        try:
+            resultado = gerar_laudo(entrada)
+            resultado["erro"]      = False
+            resultado["mensagens"] = []
+            return resultado
+        except Exception as e:
+            return {"erro": True, "mensagens": [f"Erro no processamento: {str(e)}"]}
 
-        # Arredondamentos
-        norm['V'] = round(norm['V'], 1)
-        norm['m'] = round(norm['m'], 1)
-        norm['CTC'] = round(norm['CTC'], 2)
-        norm['SB'] = round(norm['SB'], 2)
-        
-        # Micros
-        for m in ['oro', 'obre', 'erro', 'anganes', 'inco', 'nxofre']:
-            norm[m] = 0.0
-            
-        return norm
+    def processar(self) -> dict:
+        return self._executar(self._dados_solo)
 
-    def gerar_discussao_cientifica(self):
-        """Gera texto Nível A1 (PhD) com termos técnicos avançados."""
-        solo = self.solo
-        txt = []
-        
-        argila = solo.get('argila', 0)
-        ph = solo.get('ph_cacl2', 0)
-        ctc = solo.get('CTC', 0)
-        al = solo.get('Al', 0)
-        
-        txt.append("<b>1. DIAGNÓSTICO AVANÇADO</b>")
-        
-        # Textura e Fixação
-        txt.append(f"A análise revela um perfil com {argila:.1f}% de argila. Sob condições de acidez ativa (pH {ph}), o sistema apresenta alto risco de <b>Fixação Retrogradativa de Fósforo</b>, fenômeno onde fosfatos solúveis precipitam-se com óxidos de ferro e alumínio, tornando-se indisponíveis (P-Labil -> P-Não-Labil).")
-        
-        # Alumínio e Antagonismo
-        if al > 0 or solo.get('m', 0) > 10:
-             txt.append(f"A presença de Alumínio (Al³⁺: {al}) promove <b>Antagonismo Iônico</b> na rizosfera, competindo com bases trocáveis (Ca²⁺, Mg²⁺) pelos sítios de absorção radicular. Isso inibe o alongamento da coifa e reduz a exploração do volume de solo.")
-             
-        # CTC e Lixiviação
-        if ctc < 6.0:
-            txt.append(f"A baixa CTC Efetiva ({ctc:.2f} cmol/dm³), típica de solos muito intemperizados ou arenosos, predispõe o sistema à <b>Lixiviação de Cátions Monovalentes</b> (especialmente K⁺ e NO₃⁻). O Ponto de Carga Zero (PCZ) dos coloides variáveis exige manejo da matéria orgânica para aumentar a retenção de cátions.")
-            txt.append("O parcelamento da adubação potássica e nitrogenada é tecnicamente <b>mandatório</b> para aumentar a Eficiência de Uso de Nutrientes (EUN) e mitigar perdas verticais no perfil.")
-        else:
-             txt.append("A CTC apresenta valores adequados, conferindo maior tamponamento iônico ao solo, reduzindo riscos imediatos de lixiviação massiva, mas exigindo monitoramento da saturação por bases.")
-             
-        return "<br/><br/>".join(txt)
-        
-    def gerar_texto_interpretativo(self):
-        return self.gerar_discussao_cientifica()
-
-    def calcular_viabilidade_economica(self):
-        return {} 
-
-    def calcular_formulacao(self):
-        """
-        NPK INTELIGENTE (Plantio + Cobertura - Lógica V7)
-        """
-        if not self.recomendacao: return {}
-        
-        req_N = self.recomendacao['N']
-        req_P = self.recomendacao['P2O5']
-        req_K = self.recomendacao['K2O']
-        cultura = self.user.get('cultura', '').lower()
-        
-        # 1. PLANTIO (Foco P)
-        # Regra: Milho usa N no plantio. Soja usa 00-XX-XX.
-        is_graminea = any(x in cultura for x in ['milho', 'trigo', 'arroz', 'sorgo', 'pastagem', 'capim'])
-        
-        # Fórmulas Candidatas
-        if is_graminea:
-            candidatas = ["08-24-12", "05-25-15", "04-14-08", "10-30-10"] # Com N
-        else:
-            candidatas = ["00-20-20", "00-18-18", "00-30-10", "04-14-08"] # Baixo ou Zero N
-            
-        melhor_formula = None
-        melhor_dose = 0
-        melhor_delta = float('inf')
-        
-        # Seleção Best Fit para P
-        for fmt in candidatas:
-            fN, fP, fK = parse_formula(fmt)
-            if fP == 0: continue
-            
-            # Dose para 100% P
-            dose = (req_P / fP) * 100 if req_P > 0 else 0
-            dose = int(round(dose))
-            
-            if dose == 0 and req_P > 0: continue
-            
-            # Preferência por doses operacionais (200-500kg)
-            dist = abs(dose - 350)
-            if dose < 150: dist += 200
-            
-            if dist < melhor_delta:
-                melhor_delta = dist
-                melhor_formula = fmt
-                melhor_dose = dose
-                
-        if not melhor_formula:
-            melhor_formula = "00-00-00"
-            melhor_dose = 0
-            
-        # Calcular fornecido no plantio
-        fN, fP, fK = parse_formula(melhor_formula)
-        n_plantio = (melhor_dose * fN) / 100
-        p_plantio = (melhor_dose * fP) / 100
-        k_plantio = (melhor_dose * fK) / 100
-        
-        # 2. COBERTURA (O Pulo do Gato)
-        falta_N = max(0, req_N - n_plantio)
-        falta_K = max(0, req_K - k_plantio)
-        
-        cob_items = []
-        
-        # Ureia
-        if falta_N > 10:
-            dose_ureia = int(falta_N / 0.45)
-            cob_items.append({"nome": "Ureia", "formula": "45-00-00", "dose": dose_ureia, "desc": f"N"})
-            
-        # KCl
-        if falta_K > 10:
-            dose_kcl = int(falta_K / 0.60)
-            cob_items.append({"nome": "KCl", "formula": "00-00-60", "dose": dose_kcl, "desc": f"K"})
-            
-        # 3. OUTPUT
-        # "PLANTIO: [Dose] kg/ha de [Fórmula]. COBERTURA: [Dose] kg/ha de Ureia + [Dose] kg/ha de KCl."
-        
-        plantio_str = f"PLANTIO: {melhor_dose} kg/ha de {melhor_formula}"
-        
-        cob_parts = []
-        for item in cob_items:
-            cob_parts.append(f"{item['dose']} kg/ha de {item['nome']}")
-            
-        if cob_parts:
-            cob_str = "COBERTURA: " + " + ".join(cob_parts)
-        else:
-            cob_str = "COBERTURA: Não necessária"
-            
-        texto_final = f"{plantio_str}. {cob_str}."
-        
-        return {
-            "sugestao": melhor_formula,
-            "dose_ha": melhor_dose,
-            "texto_completo": texto_final,
-            "plano": {
-                "plantio": {"formula": melhor_formula, "dose": melhor_dose, "N": n_plantio, "P": p_plantio, "K": k_plantio},
-                "cobertura": cob_items
-            }
-        }
-    
-    def validar_dados_minimos(self):
-        """Valida se tem dados suficientes para análise"""
-        # SRE 4.0: Validação Relaxada (Melhor ter laudo parcial do que erro)
-        minimos = {
-            'ph_cacl2': 'pH',
-            # 'argila': 'Argila', # Se faltar argila, usamos média (já tratado no normalizer)
-            # 'P': 'Fósforo',     # Se faltar, assume baixo
-            # 'K': 'Potássio'     # Se faltar, assume baixo
-        }
-        
-        # Só bloqueia se não tiver pH (o mínimo do mínimo)
-        if self.solo.get('ph_cacl2', 0) == 0 and self.solo.get('ph_agua', 0) == 0:
-            self.erros.append("DADOS CRÍTICOS: Não encontrei valor de pH.")
-            return False
-            
-        # Avisos não bloqueantes (Warning Log)
-        if self.solo.get('argila', 0) == 0:
-            print("⚠️ AVISO: Argila não detectada. Usando padrão de solo médio.")
-            
-        return True
-    
-    def _classificar(self, valor, faixas):
-        """Classifica valor nas faixas da Embrapa"""
-        if valor is None:
-            return "NÃO DETECTADO"
-        
-        for classe, limites in faixas.items():
-            min_val = limites.get('min', -float('inf'))
-            max_val = limites.get('max', float('inf'))
-            
-            if min_val <= valor <= max_val:
-                return classe.upper().replace('_', ' ')
-        
-        return "FORA DA FAIXA"
-    
-    def diagnosticar(self):
-        """Diagnóstico completo do solo"""
-        if not self.validar_dados_minimos():
-            return None
-        
-        interp = KNOWLEDGE_BASE['interpretacao_solo']['parametros']
-        diag = {}
-        
-        # 1. pH
-        ph_valor = self.solo['ph_cacl2'] if self.solo['ph_cacl2'] > 0 else self.solo['ph_agua']
-        if ph_valor > 0:
-            faixa_ph = interp['ph']['cacl2'] if self.solo['ph_cacl2'] > 0 else interp['ph']['agua']
-            diag['ph'] = self._classificar(ph_valor, faixa_ph)
-        else:
-            diag['ph'] = "NÃO DETECTADO"
-        
-        # 2. Fósforo
-        p_val = self.solo['P']
-        argila = self.solo['argila']
-        faixas_p = None
-        
-        for faixa in interp['fosforo']['mehlich1']:
-            if faixa['argila_min'] <= argila <= (faixa['argila_max'] or 100):
-                faixas_p = faixa['classes']
-                break
-        
-        diag['P'] = self._classificar(p_val, faixas_p) if faixas_p else "N/D"
-        
-        # 3. Potássio
-        k_val = self.solo['K']
-        ctc = self.solo['CTC']
-        faixas_k = None
-        
-        for faixa in interp['potassio']['mg_dm3']:
-            min_ctc = faixa['ctc_ph7_min']
-            max_ctc = faixa['ctc_ph7_max'] or float('inf')
-            
-            if min_ctc <= ctc <= max_ctc:
-                faixas_k = faixa['classes']
-                break
-        
-        diag['K'] = self._classificar(k_val, faixas_k) if faixas_k else "N/D"
-        
-        # 4. Cálcio e Magnésio
-        diag['Ca'] = self._classificar(self.solo['Ca'], interp['calcio_magnesio']['calcio'])
-        diag['Mg'] = self._classificar(self.solo['Mg'], interp['calcio_magnesio']['magnesio'])
-        
-        # 5. Acidez
-        diag['Al'] = self._classificar(self.solo['Al'], interp['acidez']['al_trocavel'])
-        diag['V'] = self._classificar(self.solo['V'], interp['saturacao']['por_bases'])
-        diag['m'] = f"{self.solo['m']:.1f}%" if self.solo['m'] > 0 else "0%"
-        
-        # 6. Matéria Orgânica
-        argila_val = self.solo['argila']
-        if argila_val < 15:
-            faixa_mo = interp['materia_organica']['arenosa']
-        elif argila_val > 35:
-            faixa_mo = interp['materia_organica']['argilosa']
-        else:
-            faixa_mo = interp['materia_organica']['media']
-        
-        diag['MO'] = self._classificar(self.solo['MO'], faixa_mo)
-        
-        # 7. Micronutrientes
-        micros = interp['micronutrientes']
-        for elem in ['B', 'Cu', 'Fe', 'Mn', 'Zn', 'S']:
-            val = self.solo.get(elem, 0)
-            if elem.lower() in micros:
-                diag[elem] = self._classificar(val, micros[elem.lower()])
-            else:
-                diag[elem] = f"{val:.1f} mg/dm³" if val > 0 else "N/D"
-        
-        self.diagnostico = diag
-        return diag
-    
-    def calcular_calagem(self):
-        """Cálculo profissional de calagem"""
-        cultura = self.user.get('cultura', 'Soja').lower()
-        parametros = KNOWLEDGE_BASE['calagem']['parametros']
-        
-        # Valores atuais
-        V1 = self.solo['V']
-        CTC = self.solo['CTC']
-        Al = self.solo['Al']
-        Ca = self.solo['Ca']
-        Mg = self.solo['Mg']
-        
-        # Valores alvo
-        V2_alvos = parametros['v2_alvos']
-        V2 = V2_alvos.get(cultura, 65)  # Default 65%
-        
-        PRNT = 80  # PRNT padrão do calcário
-        
-        # 1. MÉTODO SATURAÇÃO POR BASES
-        if V1 < V2 and CTC > 0:
-            NC_bases = ((V2 - V1) * CTC) / PRNT
-        else:
-            NC_bases = 0
-        
-        # 2. MÉTODO NEUTRALIZAÇÃO DO ALUMÍNIO
-        m_percent = self.solo['m']
-        if m_percent > 10 and Al > 0:
-            NC_al = (Al * 2) * (100 / PRNT)
-        else:
-            NC_al = 0
-        
-        # 3. MÉTODO SUPRIMENTO DE Ca+Mg
-        soma_ca_mg = Ca + Mg
-        X = 3 if cultura == 'cafe' else 2  # Nível desejado de Ca+Mg
-        
-        # Fator Y baseado na textura
-        argila = self.solo['argila']
-        if argila < 15:
-            Y = 1  # Arenoso
-        elif argila <= 35:
-            Y = 2  # Médio
-        else:
-            Y = 3  # Argiloso
-        
-        if soma_ca_mg < X:
-            NC_ca_mg = ((Al * Y) + (X - soma_ca_mg)) * (100 / PRNT)
-        else:
-            NC_ca_mg = 0
-        
-        # Escolher o maior valor
-        doses = [NC_bases, NC_al, NC_ca_mg]
-        dose_final = max(doses)
-        
-        # Identificar método utilizado
-        metodo_idx = doses.index(dose_final)
-        metodos = ["Saturação por Bases", "Neutralização do Alumínio", "Suprimento de Ca+Mg"]
-        metodo_utilizado = metodos[metodo_idx]
-        
-        # Ajustar para mínimo de 1.0 t/ha se houver necessidade
-        if dose_final > 0 and dose_final < 1.0:
-            dose_final = 1.0
-        
-        return {
-            "dose_t_ha": round(dose_final, 2),
-            "metodo_utilizado": metodo_utilizado,
-            "detalhes": {
-                "nc_bases": round(NC_bases, 2),
-                "nc_al": round(NC_al, 2),
-                "nc_ca_mg": round(NC_ca_mg, 2),
-                "v_atual": round(V1, 1),
-                "v_alvo": V2,
-                "prnt": PRNT
-            }
-        }
-    
-    def recomendar_adubacao(self):
-        """Recomendação profissional de adubação baseada em Fórmulas Comerciais"""
-        cultura = self.user.get('cultura', 'Soja')
-        expectativa = self.user.get('expectativa', '')
-        
-        # --- PASSO 1: DEFINIR DEMANDA NUTRICIONAL (Extração - Estoque) ---
-        # Simplificação: Usaremos os valores da tabela de recomendação como "Demanda de Reposição + Correção"
-        
-        kb = KNOWLEDGE_BASE['recomendacao_adubacao']
-        demanda = {
-            "N": 0, "P2O5": 0, "K2O": 0, "S": 0,
-            "origem": "", "obs": []
-        }
-        
-        # Determinar tabela a usar (Específica ou Mestra)
-        # Reutilizando lógica existente para pegar Kg/ha de NPK
-        
-        nivel_p = self.diagnostico.get('P', 'BAIXO')
-        nivel_k = self.diagnostico.get('K', 'BAIXO')
-        
-        uso_especifica = False
-        if cultura.lower() == 'soja':
-            uso_especifica = True
-            demanda['origem'] = "Tabela Específica - Soja"
-            demanda['N'] = 0 # Leguminosa
-            
-            # Mapear nível para disponibilidade
-            nivel_map = {'MUITO BAIXO': 'Baixa', 'BAIXO': 'Baixa', 'MEDIO': 'Média', 'ADEQUADO': 'Alta', 'ALTO': 'Muito Alta'}
-            disponibilidade = nivel_map.get(nivel_p, 'Média')
-            
-            for linha in kb['tabelas_especificas']['soja']['dados']:
-                if linha['disponibilidade'] == disponibilidade:
-                    demanda['P2O5'] = linha['p2o5_kg_ha']
-                    demanda['K2O'] = linha['k2o_kg_ha']
-                    break
-            demanda['obs'].append("Soja: N=0 (Fixação Biológica). Foco em P e K.")
-
-        elif cultura.lower() == 'milho':
-            uso_especifica = True
-            demanda['origem'] = "Tabela Específica - Milho"
-            
-            # Expectativa
-            rendimento = 8.0 # Default
-            if 'alta' in expectativa.lower(): rendimento = 10.0
-            elif 'baixa' in expectativa.lower(): rendimento = 6.0
-            
-            # Encontrar linha
-            best_match = None
-            min_diff = float('inf')
-            
-            for linha in kb['tabelas_especificas']['milho']['dados']:
-                txt_rend = linha['expectativa_rendimento'].replace(',', '.')
-                match = re.search(r'(\d+\.?\d*)', txt_rend)
-                if match:
-                    val = float(match.group(1))
-                    if abs(val - rendimento) < min_diff:
-                        min_diff = abs(val - rendimento)
-                        best_match = linha
-            
-            if best_match:
-                n_data = best_match['nitrogenio']
-                demanda['N'] = n_data['semeadura'] + n_data['cobertura']
-                
-                # P
-                if 'ALTO' in nivel_p: demanda['P2O5'] = best_match['fosforo']['alto']
-                else: demanda['P2O5'] = best_match['fosforo']['adequado']
-                
-                # K
-                k_sem = best_match['potassio']['semeadura']['alto' if 'ALTO' in nivel_k else 'adequado']
-                k_cob = best_match['potassio'].get('cobertura', 0)
-                demanda['K2O'] = k_sem + k_cob
-        
-        else:
-            # Tabela Mestra
-            demanda['origem'] = "Tabela Mestra (Genérica)"
-            argila = self.solo['argila']
-            ctc = self.solo['CTC']
-            
-            for faixa in kb['tabela_mestra']['dados']:
-                if faixa['teor_argila_min'] <= argila <= (faixa['teor_argila_max'] or 100):
-                    # P
-                    p_key = nivel_p.split()[0].lower() if ' ' in nivel_p else nivel_p.lower()
-                    demanda['P2O5'] = faixa['fosforo'].get(p_key, 60)
-                    
-                    # K
-                    k_dict = faixa['potassio_ctc_menor_4'] if ctc < 4 else faixa['potassio_ctc_maior_igual_4']
-                    k_key = nivel_k.split()[0].lower() if ' ' in nivel_k else nivel_k.lower()
-                    demanda['K2O'] = k_dict.get(k_key, 60)
-                    
-                    # N
-                    n_data = faixa['nitrogenio']
-                    demanda['N'] = n_data['semeadura_max'] + n_data['cobertura_max']
-                    break
-        
-        # Enxofre (Default)
-        demanda['S'] = 20
-        
-        return demanda
-    
-    def gerar_texto_interpretativo(self):
-        """Gera texto de consultoria técnica avançada (Estilo Revista Científica A1)"""
-        textos = []
-        
-        # Dados Base
-        argila = self.solo.get('argila', 0)
-        ph = self.solo.get('ph_agua', 0)
-        ctc = self.solo.get('CTC', 0)
-        k_val = self.solo.get('K', 0)
-        
-        # --- 1. DINÂMICA QUÍMICA (pH e P) ---
-        if ph > 0 and ph < 5.5:
-             textos.append(
-                f"<b>DINÂMICA DE FÓSFORO (Fixação):</b> A acidez ativa atual (pH {ph:.1f}) promove a solubilização de Alumínio trocável "
-                "e a precipitação de íons fosfato em formas de fosfatos de ferro e alumínio (P-Fe e P-Al), compostos de baixa solubilidade. "
-                "<b>Consequência:</b> A eficiência da adubação fosfatada será drasticamente reduzida devido à reação de fixação específica "
-                "na superfície dos coloides. A correção do pH é pré-requisito termodinâmico para a disponibilidade de P."
-             )
-        
-        # --- 2. INTERAÇÃO TEXTURAL E CTC ---
-        # Definir classe
-        if argila < 15: classe = "Arenosa"
-        elif argila <= 35: classe = "Média-Argilosa"
-        else: classe = "Argilosa"
-        
-        if argila > 35:
-            textos.append(
-                f"<b>CLASSE TEXTURAL E RETENÇÃO CATIONICA:</b> A classe textural {classe} (Argila {argila:.1f}%) confere ao solo alta "
-                "capacidade de retenção de cátions (CTC potencial), criando um reservatório nutricional expressivo. "
-                "Contudo, o manejo físico deve ser cauteloso quanto à compactação superficial. "
-                "Para o Potássio, a alta superfície específica das argilas permite maior adsorção, reduzindo perdas, "
-                "mas exige níveis críticos mais altos para garantir a dessorção para a solução do solo."
-            )
-        elif argila < 15:
-            textos.append(
-                f"<b>DINÂMICA FÍSICO-HÍDRICA ({classe}):</b> A baixa presença de coloides argilosos limita severamente a CTC ({ctc:.2f} cmol/dm³), "
-                "implicando em baixa retenção de nutrientes e água. O ambiente oxidativo favorece a decomposição da matéria orgânica. "
-                "O parcelamento das adubações nitrogenadas e potássicas torna-se mandatório para mitigar perdas por lixiviação vertical."
-            )
-        else:
-            textos.append(
-                 f"<b>AMBIENTE FÍSICO ({classe}):</b> Solo com equilíbrio textural favorável à mecanização e exploração radicular. "
-                 "A capacidade de armazenamento de água é intermediária, exigindo monitoramento climático para decisões de adubação de cobertura."
-            )
-
-        # --- 3. POTÁSSIO E SALINIDADE ---
-        if k_val < 50 and ctc < 5:
-            textos.append(
-                "<b>MANEJO DE POTÁSSIO (Risco Salino):</b> A combinação de baixo teor original de K e baixa CTC condiciona um sistema "
-                "suscetível ao estresse salino na rizosfera. A adubação potássica massiva no sulco causaria plasmólise radicular. "
-                "O parcelamento estratégico proposto visa sincronizar a oferta do nutriente com a taxa de absorção da cultura, "
-                "minimizando picos osmóticos nocivos."
-            )
-
-        # Fallback textual
-        if len(textos) == 0:
-            textos.append(
-                "<b>DIAGNÓSTICO INTEGRADO:</b> Os parâmetros analisados indicam um perfil de fertilidade que demanda correções pontuais. "
-                "Siga rigorosamente as recomendações de calagem e o parcelamento de NPK para otimizar a eficiência agronômica."
-            )
-
-        return "<br/><br/>".join(textos)
-
-    def calcular_viabilidade_economica(self):
-        # Manteve igual, omitido para brevidade se não for mudar.
-        return {} 
-
-    def calcular_formulacao(self):
-        """
-        Calcula produtos comerciais (Decisão por Cultura + 2 Etapas)
-        """
-        if not self.recomendacao: return {}
-        
-        req_N = self.recomendacao['N']
-        req_P = self.recomendacao['P2O5']
-        req_K = self.recomendacao['K2O']
-        cultura = self.user.get('cultura', '').lower()
-        
-        # --- PASSO A: SELEÇÃO DA FÓRMULA DE SEMEADURA ---
-        
-        # Regra de Cultura (N no Plantio)
-        # Gramíneas (Milho, Trigo, Arroz, Sorgo) -> EXIGEM N no plantio
-        # Leguminosas (Soja, Feijão) -> Toleram/Preferem sem N ou pouco N
-        
-        is_graminea = any(x in cultura for x in ['milho', 'trigo', 'arroz', 'sorgo', 'pastagem', 'capim'])
-        
-        candidatas_raw = COMMERCIAL_FORMULAS.get('semeadura', [])
-        candidatas_validas = []
-        
-        for fmt in candidatas_raw:
-            fN, fP, fK = parse_formula(fmt)
-            
-            # Filtro de N para Gramíneas
-            if is_graminea:
-                if fN == 0: continue # Descarta 00-XX-XX para milho
-            else:
-                # Opcional: Para soja, poderíamos preferir N baixo, mas não estritamente proibir N (ex: 04-14-08 usa-se em soja)
-                pass 
-                
-            if fP == 0: continue # Precisa ter P no plantio
-            
-            candidatas_validas.append(fmt)
-            
-        # Se filtro foi muito agressivo e sobrou nada, restaura originais (fallback)
-        if not candidatas_validas:
-            candidatas_validas = candidatas_raw
-
-        # Seleção "Best Match" pelo Fósforo (P)
-        melhor_formula = None
-        melhor_dose = 0
-        melhor_diff_range = float('inf')
-        
-        for fmt_str in candidatas_validas:
-            fN, fP, fK = parse_formula(fmt_str)
-            
-            # Dose para 100% P
-            if req_P <= 0:
-                dose_calc = 0
-            else:
-                dose_calc = (req_P / fP) * 100
-                
-            dose_int = int(round(dose_calc))
-            if dose_int == 0: continue
-            
-            # Preferência Operacional (300-500kg)
-            dist = abs(dose_int - 400)
-            if dose_int < 150: dist += 200
-            if dose_int > 800: dist += 300
-            
-            if dist < melhor_diff_range:
-                melhor_diff_range = dist
-                melhor_formula = fmt_str
-                melhor_dose = dose_int
-                
-        if not melhor_formula:
-            melhor_formula = "00-00-00"
-            melhor_dose = 0
-            
-        # Calcular Fornecido no Plantio
-        fN, fP, fK = parse_formula(melhor_formula)
-        forn_N = (melhor_dose * fN) / 100
-        forn_P = (melhor_dose * fP) / 100
-        
-        # Check Salinidade K no sulco (>60 kg/ha K2O)
-        k_no_sulco = (melhor_dose * fK) / 100
-        if k_no_sulco > 60:
-            # Opção A: Reduzir dose para teto de 60kg K2O (Priorizando segurança salina)
-            # Mas isso reduziria P. 
-            # Opção B: Se a fórmula escolhida causa salinidade, tentamos trocar?
-            # Por hora, mantemos a dose mas jogamos alerta? 
-            # O prompt pede: "Limitar dose e jogar resto pra cobertura".
-            
-            # Recalcular dose limitada por K
-            dose_limite_salino = (60 / fK) * 100
-            
-            # Se a redução for drástica (>20% de corte no P), talvez fosse melhor outra fórmula, 
-            # mas vamos seguir a instrução de limitar.
-            melhor_dose = int(dose_limite_salino)
-            
-            # Recalcular fornecidos com nova dose
-            forn_N = (melhor_dose * fN) / 100
-            forn_P = (melhor_dose * fP) / 100
-            k_no_sulco = 60.0 # Travado no teto
-            
-        forn_K_sulco = k_no_sulco
-        
-        # --- PASSO B: CÁLCULO DO DÉFICIT (COBERTURA) ---
-        falta_N = max(0, req_N - forn_N)
-        # O déficit de K aumenta se limitamos no sulco
-        falta_K = max(0, req_K - forn_K_sulco)
-        
-        cob_items = []
-        
-        # Ureia (45-00-00) para N
-        if falta_N > 10:
-            dose_ureia = int(round((falta_N / 45) * 100))
-            cob_items.append({"nome": "Ureia", "formula": "45-00-00", "dose": dose_ureia, "desc": f"{falta_N:.1f}kg N"})
-        else:
-            dose_ureia = 0
-            
-        # KCl (00-00-60) para K
-        if falta_K > 10:
-            dose_kcl = int(round((falta_K / 60) * 100))
-            cob_items.append({"nome": "KCl", "formula": "00-00-60", "dose": dose_kcl, "desc": f"{falta_K:.1f}kg K₂O"})
-        else:
-            dose_kcl = 0
-            
-        # --- OUTPUT TEXT ---
-        # Plantio: X kg/ha da Fórmula Y.
-        if melhor_dose > 0:
-            msg_plantio = f"PLANTIO: {melhor_dose} kg/ha de {melhor_formula}"
-        else:
-            msg_plantio = "PLANTIO: N/A"
-            
-        # Cobertura (Estádio V4): X kg/ha de Ureia + Y kg/ha de KCl.
-        msg_cob = ""
-        if cob_items:
-            partes = [f"{item['dose']} kg/ha de {item['nome']}" for item in cob_items]
-            msg_cob = "COBERTURA (V4): " + " + ".join(partes)
-        else:
-            msg_cob = "COBERTURA: Não necessária"
-            
-        texto_final = f"{msg_plantio}. {msg_cob}."
-        
-        return {
-            "sugestao": melhor_formula,
-            "dose_ha": melhor_dose,
-            "texto_completo": texto_final,
-            "plano": {
-                "plantio": {"formula": melhor_formula, "dose": melhor_dose, "N": forn_N, "P": forn_P, "K": forn_K_sulco},
-                "cobertura": cob_items
-            }
-        }
-    
-    def processar(self):
-        """Processamento completo"""
-        # 1. Diagnóstico
-        self.diagnosticar()
-        
-        if self.erros:
-            return {
-                "erro": True,
-                "mensagens": self.erros,
-                "sugestao": "Forneça os dados faltantes manualmente"
-            }
-        
-        # 2. Calagem
-        calagem = self.calcular_calagem()
-        
-        # 3. Adubação
-        self.recomendacao = self.recomendar_adubacao()
-        
-        # 4. Formulação
-        formulacao = self.calcular_formulacao()
-        
-        # 5. Texto Interpretativo (Novo)
-        texto_interpretativo = self.gerar_texto_interpretativo()
-        
-        # 6. Viabilidade Econômica (Novo)
-        economia = self.calcular_viabilidade_economica()
-        
-        return {
-            "status": "SUCESSO",
-            "diagnostico": self.diagnostico,
-            "texto_interpretativo": texto_interpretativo,
-            "calagem": calagem,
-            "adubacao": self.recomendacao,
-            "formulacao": formulacao,
-            "economia": economia,
-            "solo": self.solo,
-            "meta_dados": {
-                "cultura": self.user.get('cultura'),
-                "expectativa": self.user.get('expectativa', ''),
-                "propriedade": self.user.get('propriedade', ''),
-                "nome": self.user.get('nome', '')
-            }
-        }
-
-    def processar_com_dados_manuais(self, dados_manuais):
-        """Processa com dados manuais fornecidos pelo usuário"""
-        # Converter dados manuais para o formato esperado
-        dados_solo = {
-            'fisica': {
-                'argila': dados_manuais.get('argila'),
-                'areia': dados_manuais.get('areia'),
-                'silte': dados_manuais.get('silte')
-            },
-            'quimica': {
-                'ph_cacl2': dados_manuais.get('ph_cacl2'),
-                'ph_agua': dados_manuais.get('ph_agua'),
-                'fosforo_mg': dados_manuais.get('fosforo_mg'),
-                'potassio_mg': dados_manuais.get('potassio_mg'),
-                'calcio_cmolc': dados_manuais.get('calcio_cmolc'),
-                'magnesio_cmolc': dados_manuais.get('magnesio_cmolc'),
-                'aluminio_cmolc': dados_manuais.get('aluminio_cmolc'),
-                'h_al_cmolc': dados_manuais.get('h_al_cmolc'),
-                'ctc_total': dados_manuais.get('ctc_total'),
-                'v_percentual': dados_manuais.get('v_percentual'),
-                'm_percentual': dados_manuais.get('m_percentual'),
-                'materia_organica': dados_manuais.get('materia_organica')
-            },
-            'micronutrientes': {
-                'enxofre': dados_manuais.get('enxofre'),
-                'boro': dados_manuais.get('boro'),
-                'zinco': dados_manuais.get('zinco'),
-                'cobre': dados_manuais.get('cobre'),
-                'manganes': dados_manuais.get('manganes'),
-                'ferro': dados_manuais.get('ferro')
-            }
-        }
-        
-        # Substituir None por valores vazios
-        for categoria in dados_solo:
-            if dados_solo[categoria] is None:
-                dados_solo[categoria] = {}
-            for chave, valor in list(dados_solo[categoria].items()):
-                if valor is None:
-                    dados_solo[categoria][chave] = 0.0
-        
-        # Atualizar dados do solo
-        self.raw_solo = dados_solo
-        self.solo = self._normalizar_dados(dados_solo)
-        
-        return self.processar()
+    def processar_com_dados_manuais(self, dados_manuais: dict) -> dict:
+        return self._executar(dados_manuais)

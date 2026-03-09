@@ -1,40 +1,52 @@
-# venv
+# Ambiente virtual
 .venv/
 venv/
 
-# python
+# Python
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 
-# env
+# Variáveis de ambiente — NUNCA commitar
 .env
 .env.*
 !.env.example
 
-# Laudos gerados pelo bot
+# Laudos e PDFs gerados pelo bot
+*.pdf
 Laudo_*.pdf
-*_db.json
+
+# Arquivos temporários do bot (fotos/PDFs recebidos)
+temp_*
+
+# Backups gerados por patches e edições
+*.bak
+*.bak_*
+
+# Scripts de debug e patch locais
+debug_*.py
+patch_*.py
+
+# Scripts de teste com chaves reais
+test_gemini_key.py
 
 # Logs
 *.log
 
 # Dados de usuários
 users_log.csv
+*_db.json
 
-# Imagens temporárias
-temp_*.jpg
-
-# logs
-*.log
-
-# artifacts / generated
-*.pdf
-temp_*
+# Saídas geradas
 output/
 reports/
 
-# OS/Editor
+# Credenciais Google Cloud (Application Default Credentials)
+*.json
+!.env.example
+
+# OS / Editores
 .vscode/
 .DS_Store
+Thumbs.db
